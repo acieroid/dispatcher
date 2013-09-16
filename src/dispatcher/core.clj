@@ -31,38 +31,47 @@
         ns (mod t 1000000)
         context (ZMQ/context 1)
         socket (.socket context ZMQ/PAIR)
-        started (atom false)
         _ (.connect socket (:destination dispatcher))
         thread
         (future
           (try
             (loop []
+              ;; Wait in order to respect the max. throughput
               (Thread/sleep ms ns)
+              ;; Send the events waiting to be sent
               (swap! (:buffer dispatcher)
                      #(if (empty? %)
                         []
-                        (do
-                          (.send socket
-                                 (.getBytes
-                                  (str {:type :event
-                                        :event (first %)})))
-                          (swap! started (fn [_] true))
-                          (into [] (rest %)))))
-              (when @started
-                (when-let [reply (.recv socket ZMQ/NOBLOCK)]
-                  (let [msg (read-string (String. reply))]
-                    (case (keyword (:type msg))
-                      :recognition
-                      (swap! (:expected dispatcher)
-                             #(if-let [expected-t (get % (:event msg))]
-                                (let [time-took (- (now) expected-t)]
-                                  (println (str "Recognition: " (:event msg)
-                                                " (took" time-took "ms)"))
-                                  (dissoc % (:event msg)))
-                                (do
-                                  (println "Unexpected recognition:" (:event msg))
-                                  %)))
-                      (println "Unexpected reply:" msg)))))
+                        (if (= (:type (first %)) :event)
+                          (do
+                            (.send socket (.getBytes (str (first %))))
+                            (into [] (rest %)))
+                          %)))
+              ;; Handle the expected events stored in the buffer
+              (swap! (:buffer dispatcher)
+                     (fn [b]
+                       (let [[expected buffer] (split-with
+                                                #(= (:type %) :expected)
+                                                b)]
+                         (mapv #(swap! (:expected dispatcher) conj {(:event %)
+                                                                    (now)})
+                               expected)
+                         buffer)))
+              ;; Receive the events
+              (when-let [reply (.recv socket ZMQ/NOBLOCK)]
+                (let [msg (read-string (String. reply))]
+                  (case (keyword (:type msg))
+                    :recognition
+                    (swap! (:expected dispatcher)
+                           #(if-let [expected-t (get % (:event msg))]
+                              (let [time-took (- (now) expected-t)]
+                                (println (str "Recognition: " (:event msg)
+                                              " (took" time-took "ms)"))
+                                (dissoc % (:event msg)))
+                              (do
+                                (println "Unexpected recognition:" (:event msg))
+                                %)))
+                    (println "Unexpected reply:" msg))))
               (recur))
             (catch Exception e
               (println "Error in background task:" e)
@@ -81,14 +90,14 @@
 (defn enqueue
   "Enqueue an event to be sent later"
   [dispatcher event]
-  (swap! (:buffer dispatcher) conj event)
+  (swap! (:buffer dispatcher) conj {:type :event :event event})
   dispatcher)
 
 (defn expect
   "Remembers that an event is expected to happen now. Will compute the
   delay between now and the time it will really happen"
   [dispatcher event]
-  (swap! (:expected dispatcher) conj {event (now)})
+  (swap! (:buffer dispatcher) conj {:type :expected :event event})
   dispatcher)
 
 (defn cancel
