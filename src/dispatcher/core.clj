@@ -26,6 +26,7 @@
         ns (mod t 1000000)
         context (ZMQ/context 1)
         socket (.socket context ZMQ/REQ)
+        started (atom false)
         _ (.bind socket (:destination dispatcher))
         thread
         (future
@@ -38,20 +39,22 @@
                         (println "Sending" (first %))
                         (.send socket (json/generate-string {:type :event
                                                              :event (first %)}))
+                        (swap! started (fn [_] true))
                         (into [] (rest %)))))
-            (when-let [reply (.recv socket ZMQ/NOBLOCK)]
-              (case (:type reply)
-                :recognition
-                (swap! (:expected dispatcher)
-                       #(if-let [expected-t (get % (:event reply))]
-                          (let [time-took (- (now) expected-t)]
-                            (println (str "Recognition: " (:event reply)
-                                          " (took" time-took "ms)"))
-                            (dissoc % (:event reply)))
-                          (do
-                            (println "Unexpected recognition:" (:event reply))
-                            %)))
-                (println "Unexpected reply:" reply)))
+            (when @started
+              (when-let [reply (.recv socket ZMQ/NOBLOCK)]
+                (case (:type reply)
+                  :recognition
+                  (swap! (:expected dispatcher)
+                         #(if-let [expected-t (get % (:event reply))]
+                            (let [time-took (- (now) expected-t)]
+                              (println (str "Recognition: " (:event reply)
+                                            " (took" time-took "ms)"))
+                              (dissoc % (:event reply)))
+                            (do
+                              (println "Unexpected recognition:" (:event reply))
+                              %)))
+                  (println "Unexpected reply:" reply))))
             (recur)))]
     (update-in dispatcher [:thread] (fn [_] thread))))
 
