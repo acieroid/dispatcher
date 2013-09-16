@@ -37,24 +37,27 @@
                       []
                       (do
                         (println "Sending" (first %))
-                        (.send socket (json/generate-string {:type :event
-                                                             :event (first %)}))
+                        (.send socket
+                               (.getBytes
+                                (json/generate-string {:type :event
+                                                       :event (first %)})))
                         (swap! started (fn [_] true))
                         (into [] (rest %)))))
             (when @started
               (when-let [reply (.recv socket ZMQ/NOBLOCK)]
-                (case (:type reply)
-                  :recognition
-                  (swap! (:expected dispatcher)
-                         #(if-let [expected-t (get % (:event reply))]
-                            (let [time-took (- (now) expected-t)]
-                              (println (str "Recognition: " (:event reply)
-                                            " (took" time-took "ms)"))
-                              (dissoc % (:event reply)))
-                            (do
-                              (println "Unexpected recognition:" (:event reply))
-                              %)))
-                  (println "Unexpected reply:" reply))))
+                (let [msg (json/parse-string (String. reply) true)]
+                  (case (keyword (:type msg))
+                    :recognition
+                    (swap! (:expected dispatcher)
+                           #(if-let [expected-t (get % (:event msg))]
+                              (let [time-took (- (now) expected-t)]
+                                (println (str "Recognition: " (:event msg)
+                                              " (took" time-took "ms)"))
+                                (dissoc % (:event msg)))
+                              (do
+                                (println "Unexpected recognition:" (:event msg))
+                                %)))
+                    (println "Unexpected reply:" msg)))))
             (recur)))]
     (update-in dispatcher [:thread] (fn [_] thread))))
 
