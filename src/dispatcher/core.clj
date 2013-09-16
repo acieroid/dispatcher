@@ -18,7 +18,8 @@
 
 (defn now
   "Return the current time in milliseconds"
-  [])
+  []
+  (System/currentTimeMillis))
 
 (defn- spawn-loop
   "Spawn a background task that sends the events received by the
@@ -53,10 +54,12 @@
                        (let [[expected buffer] (split-with
                                                 #(= (:type %) :expected)
                                                 b)]
-                         (mapv #(swap! (:expected dispatcher) conj {(:event %)
-                                                                    (now)})
-                               expected)
-                         buffer)))
+                         (when (not (empty? expected))
+                           (println "add expected" (str (into [] expected)))
+                           (mapv #(swap! (:expected dispatcher) conj {(:event %)
+                                                                      (now)})
+                                 expected))
+                         (into [] buffer))))
               ;; Receive the events
               (when-let [reply (.recv socket ZMQ/NOBLOCK)]
                 (let [msg (read-string (String. reply))]
@@ -66,7 +69,7 @@
                            #(if-let [expected-t (get % (:event msg))]
                               (let [time-took (- (now) expected-t)]
                                 (println (str "Recognition: " (:event msg)
-                                              " (took" time-took "ms)"))
+                                              " (took " time-took "ms)"))
                                 (dissoc % (:event msg)))
                               (do
                                 (println "Unexpected recognition:" (:event msg))
