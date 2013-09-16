@@ -35,34 +35,38 @@
         _ (.connect socket (:destination dispatcher))
         thread
         (future
-          (loop []
-            (Thread/sleep ms ns)
-            (swap! (:buffer dispatcher)
-                   #(if (empty? %)
-                      []
-                      (do
-                        (.send socket
-                               (.getBytes
-                                (str {:type :event
-                                      :event (first %)})))
-                        (swap! started (fn [_] true))
-                        (into [] (rest %)))))
-            (when @started
-              (when-let [reply (.recv socket ZMQ/NOBLOCK)]
-                (let [msg (read-string (String. reply) true)]
-                  (case (keyword (:type msg))
-                    :recognition
-                    (swap! (:expected dispatcher)
-                           #(if-let [expected-t (get % (:event msg))]
-                              (let [time-took (- (now) expected-t)]
-                                (println (str "Recognition: " (:event msg)
-                                              " (took" time-took "ms)"))
-                                (dissoc % (:event msg)))
-                              (do
-                                (println "Unexpected recognition:" (:event msg))
-                                %)))
-                    (println "Unexpected reply:" msg)))))
-            (recur)))]
+          (try
+            (loop []
+              (Thread/sleep ms ns)
+              (swap! (:buffer dispatcher)
+                     #(if (empty? %)
+                        []
+                        (do
+                          (.send socket
+                                 (.getBytes
+                                  (str {:type :event
+                                        :event (first %)})))
+                          (swap! started (fn [_] true))
+                          (into [] (rest %)))))
+              (when @started
+                (when-let [reply (.recv socket ZMQ/NOBLOCK)]
+                  (let [msg (read-string (String. reply))]
+                    (case (keyword (:type msg))
+                      :recognition
+                      (swap! (:expected dispatcher)
+                             #(if-let [expected-t (get % (:event msg))]
+                                (let [time-took (- (now) expected-t)]
+                                  (println (str "Recognition: " (:event msg)
+                                                " (took" time-took "ms)"))
+                                  (dissoc % (:event msg)))
+                                (do
+                                  (println "Unexpected recognition:" (:event msg))
+                                  %)))
+                      (println "Unexpected reply:" msg)))))
+              (recur))
+            (catch Exception e
+              (println "Error in background task:" e)
+              (.printStackTrace e))))]
     (update-in dispatcher [:thread] (fn [_] thread))))
 
 (defn create
