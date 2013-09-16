@@ -1,6 +1,5 @@
 (ns dispatcher.core
-  (:import [org.jeromq ZMQ])
-  (:require (cheshire (core :as json))))
+  (:import [org.jeromq ZMQ]))
 
 ;; TODO:
 ;;   - add a callback that will be called when an event is recognized?
@@ -44,13 +43,13 @@
                       (do
                         (.send socket
                                (.getBytes
-                                (json/generate-string {:type :event
-                                                       :event (first %)})))
+                                (str {:type :event
+                                      :event (first %)})))
                         (swap! started (fn [_] true))
                         (into [] (rest %)))))
             (when @started
               (when-let [reply (.recv socket ZMQ/NOBLOCK)]
-                (let [msg (json/parse-string (String. reply) true)]
+                (let [msg (read-string (String. reply) true)]
                   (case (keyword (:type msg))
                     :recognition
                     (swap! (:expected dispatcher)
