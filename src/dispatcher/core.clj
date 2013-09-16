@@ -25,7 +25,7 @@
         ;; the need for nanoseconds
         ns (mod t 1000000)
         context (ZMQ/context 1)
-        socket (.socket context ZMQ/REQ)
+        socket (.socket context ZMQ/PAIR)
         started (atom false)
         _ (.bind socket (:destination dispatcher))
         thread
