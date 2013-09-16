@@ -27,7 +27,7 @@
         context (ZMQ/context 1)
         socket (.socket context ZMQ/PAIR)
         started (atom false)
-        _ (.bind socket (:destination dispatcher))
+        _ (.connect socket (:destination dispatcher))
         thread
         (future
           (loop []
