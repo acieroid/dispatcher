@@ -30,6 +30,7 @@
         ;; The accuracy would probably not be precise enough to have
         ;; the need for nanoseconds
         ns (mod t 1000000)
+        stop (atom false)
         context (ZMQ/context 1)
         socket (.socket context ZMQ/PAIR)
         _ (.connect socket (:destination dispatcher))
@@ -39,6 +40,16 @@
             (loop []
               ;; Wait in order to respect the max. throughput
               (Thread/sleep ms ns)
+              ;; Remember if we need to stop when all remaining
+              ;; expected events are recognized
+              (swap! (:buffer dispatcher)
+                     #(if (empty? %)
+                        []
+                        (if (= (:type (first %) :stop))
+                          (do
+                            (swap! stop (fn [_] true))
+                            (into [] (rest %)))
+                          %)))
               ;; Send the events waiting to be sent
               (swap! (:buffer dispatcher)
                      #(if (empty? %)
@@ -75,7 +86,9 @@
                                 (println "Unexpected recognition:" (:event msg))
                                 %)))
                     (println "Unexpected reply:" msg))))
-              (recur))
+              (if (and @stop (empty? @(:expected dispatcher)))
+                (.send socket (.getBytes (str {:type :quit})))
+                (recur)))
             (catch Exception e
               (println "Error in background task:" e)
               (.printStackTrace e))))]
@@ -113,5 +126,5 @@
   "Don't send more events than those already stored in the
   buffer. Waits for all expected events, then return."
   [dispatcher]
-  ;; TODO
+  (swap! (:buffer dispatcher) conj {:type :stop})
   dispatcher)
