@@ -86,7 +86,11 @@
                                 %)))
                     (println "Unexpected reply:" msg))))
               (if (and @stop (empty? @(:expected dispatcher)))
-                (.send socket (.getBytes (str {:type :quit})))
+                (do
+                  (.send socket (.getBytes (str {:type :quit})))
+                  (.close socket)
+                  (.term context)
+                  (shutdown-agents))
                 (recur)))
             (catch Exception e
               (println "Error in background task:" e)
