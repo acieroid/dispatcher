@@ -45,7 +45,7 @@
               (swap! (:buffer dispatcher)
                      #(if (empty? %)
                         []
-                        (if (= (:type (first %) :stop))
+                        (if (= (:type (first %)) :stop)
                           (do
                             (swap! stop (fn [_] true))
                             (into [] (rest %)))
@@ -66,7 +66,6 @@
                                                 #(= (:type %) :expected)
                                                 b)]
                          (when (not (empty? expected))
-                           (println "add expected" (str (into [] expected)))
                            (mapv #(swap! (:expected dispatcher) conj {(:event %)
                                                                       (now)})
                                  expected))
