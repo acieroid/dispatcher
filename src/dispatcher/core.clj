@@ -1,11 +1,8 @@
-(ns dispatcher.core
+r(ns dispatcher.core
   (:import [org.jeromq ZMQ]))
 
 ;; TODO:
 ;;   - add a callback that will be called when an event is recognized?
-;;   - have some way to know when we can stop? (eg. when ``stop`` is
-;;     called, we wait until all expected events are received and then
-;;     we send a quit message, and close the connection
 
 ;; The dispatcher sends event to a destination (a string representing
 ;; the URI of a ZeroMQ socket) as map like {:type :event :event x}. It
