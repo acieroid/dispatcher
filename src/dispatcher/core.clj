@@ -44,7 +44,10 @@
         thread
         (future
           (try
-            (loop []
+            (loop [n 0]
+              (when (= (mod n 100) 0)
+                (print "\r" n "messages sent")
+                (flush))
               ;; Wait in order to respect the max. throughput
               (Thread/sleep ms ns)
               ;; Remember if we need to stop when all remaining
@@ -99,7 +102,7 @@
                   (.close socket-in)
                   (.term context)
                   (shutdown-agents))
-                (recur)))
+                (recur (inc n))))
             (catch Exception e
               (println "Error in background task:" e)
               (.printStackTrace e))))]
