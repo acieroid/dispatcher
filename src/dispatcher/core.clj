@@ -1,6 +1,19 @@
 (ns dispatcher.core
   (:import [org.zeromq ZMQ]))
 
+;; Helper functions
+(defn split
+  "Like split-with, but where ``q`` is a queue (thus call ``pop``
+  instead of ``rest``, and return a pair containing a list and a
+  queue)"
+  [pred coll]
+  (loop [a (transient [])
+         b coll]
+    (if (pred (first b))
+      (recur (conj! a (first b))
+             (pop b))
+      [(persistent! a) b])))
+
 ;; TODO:
 ;;   - add a callback that will be called when an event is recognized?
 
@@ -17,7 +30,7 @@
      ;; Map of expected events (keys), valued on the timestamp at
      ;; which they were expected
      expected
-     ;; Buffer of events to send
+     ;; Buffer of events to send (a persistent queue)
      buffer])
 
 (defn now
@@ -54,32 +67,33 @@
               ;; expected events are recognized
               (swap! (:buffer dispatcher)
                      #(if (empty? %)
-                        []
+                        clojure.lang.PersistentQueue/EMPTY
                         (if (= (:type (first %)) :stop)
                           (do
                             (swap! stop (fn [_] true))
-                            (into [] (rest %)))
+                            (pop %))
                           %)))
               ;; Send the events waiting to be sent
               (swap! (:buffer dispatcher)
                      #(if (empty? %)
-                        []
+                        clojure.lang.PersistentQueue/EMPTY
                         (if (= (:type (first %)) :event)
                           (do
+
                             (.send socket-out (str (first %)))
-                            (into [] (rest %)))
+                            (pop %))
                           %)))
               ;; Handle the expected events stored in the buffer
               (swap! (:buffer dispatcher)
                      (fn [b]
-                       (let [[expected buffer] (split-with
+                       (let [[expected buffer] (split
                                                 #(= (:type %) :expected)
                                                 b)]
                          (when (not (empty? expected))
                            (mapv #(swap! (:expected dispatcher) conj {(:event %)
                                                                       (now)})
                                  expected))
-                         (into [] buffer))))
+                         buffer)))
               ;; Receive the events
               (when-let [reply (.recv socket-in ZMQ/NOBLOCK)]
                 (let [msg (read-string (String. reply))]
@@ -112,7 +126,9 @@
   "Create a dispatcher and launch a background task that will send the
   messages without exceeding the given throughput."
   [dest-in dest-out throughput]
-  (let [dispatcher (Dispatcher. dest-in dest-out throughput (atom {}) (atom []))]
+  (let [dispatcher (Dispatcher. dest-in dest-out throughput
+                                (atom {})
+                                (atom clojure.lang.PersistentQueue/EMPTY))]
     ;; Spawn loop updates the dispatcher and returns it (and creates
     ;; the background loop that sends the events)
     (spawn-loop dispatcher)))
