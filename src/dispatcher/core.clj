@@ -1,5 +1,5 @@
-r(ns dispatcher.core
-  (:import [org.jeromq ZMQ]))
+(ns dispatcher.core
+  (:import [org.zeromq ZMQ]))
 
 ;; TODO:
 ;;   - add a callback that will be called when an event is recognized?
@@ -53,7 +53,7 @@ r(ns dispatcher.core
                         []
                         (if (= (:type (first %)) :event)
                           (do
-                            (.send socket (.getBytes (str (first %))))
+                            (.send socket (str (first %)))
                             (into [] (rest %)))
                           %)))
               ;; Handle the expected events stored in the buffer
@@ -84,7 +84,7 @@ r(ns dispatcher.core
                     (println "Unexpected reply:" msg))))
               (if (and @stop (empty? @(:expected dispatcher)))
                 (do
-                  (.send socket (.getBytes (str {:type :quit})))
+                  (.send socket (str {:type :quit}))
                   (.close socket)
                   (.term context)
                   (shutdown-agents))
