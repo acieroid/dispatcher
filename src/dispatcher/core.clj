@@ -39,10 +39,8 @@
         socket-out (.socket context ZMQ/PUB)
         socket-in (.socket context ZMQ/SUB)
         _ (.bind socket-out (:dest-out dispatcher))
-        _ (println "socket-out" (:dest-out dispatcher))
         _ (.connect socket-in (:dest-in dispatcher))
         _ (.subscribe socket-in (.getBytes "")) ; subscribe to all messages
-        _ (println "socket-in" (:dest-in dispatcher))
         thread
         (future
           (try
@@ -65,7 +63,6 @@
                         []
                         (if (= (:type (first %)) :event)
                           (do
-                            (println "Sending" (first %) "on" socket-out)
                             (.send socket-out (str (first %)))
                             (into [] (rest %)))
                           %)))
@@ -141,4 +138,10 @@
   buffer. Waits for all expected events, then return."
   [dispatcher]
   (swap! (:buffer dispatcher) conj {:type :stop})
+  dispatcher)
+
+(defn abort
+  "Directly send a stop message and drop all bufferised events"
+  [dispatcher]
+  (swap! (:buffer dispatcher) (fn [b] [{:type :stop}]))
   dispatcher)
