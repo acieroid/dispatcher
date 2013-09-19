@@ -6,12 +6,19 @@
 
 ;; The dispatcher sends event to a destination (a string representing
 ;; the URI of a ZeroMQ socket) as map like {:type :event :event x}. It
-;; can also send other messages such as {:type :quit}. It sends those
-;; events with a maximum throughput (expressed in messages/seconds),
-;; and contains a map indexed by events, and whose values are the time
-;; at which they are expected to be recognized, and a buffer
-;; containing events that will be sent.
-(defrecord Dispatcher [destination throughput expected buffer])
+;; can also send other messages such as {:type :quit}.
+(defrecord Dispatcher
+    [;; URI where the dispatcher will send the events
+     dest-out
+     ;; URI from where the dispatcher will read the recognized events
+     dest-in
+     ;; Maximum throughput (ev/s)
+     throughput
+     ;; Map of expected events (keys), valued on the timestamp at
+     ;; which they were expected
+     expected
+     ;; Buffer of events to send
+     buffer])
 
 (defn now
   "Return the current time in milliseconds"
@@ -29,8 +36,13 @@
         ns (mod t 1000000)
         stop (atom false)
         context (ZMQ/context 1)
-        socket (.socket context ZMQ/PAIR)
-        _ (.connect socket (:destination dispatcher))
+        socket-out (.socket context ZMQ/PUB)
+        socket-in (.socket context ZMQ/SUB)
+        _ (.bind socket-out (:dest-out dispatcher))
+        _ (println "socket-out" (:dest-out dispatcher))
+        _ (.connect socket-in (:dest-in dispatcher))
+        _ (.subscribe socket-in (.getBytes "")) ; subscribe to all messages
+        _ (println "socket-in" (:dest-in dispatcher))
         thread
         (future
           (try
@@ -53,7 +65,8 @@
                         []
                         (if (= (:type (first %)) :event)
                           (do
-                            (.send socket (str (first %)))
+                            (println "Sending" (first %) "on" socket-out)
+                            (.send socket-out (str (first %)))
                             (into [] (rest %)))
                           %)))
               ;; Handle the expected events stored in the buffer
@@ -68,7 +81,7 @@
                                  expected))
                          (into [] buffer))))
               ;; Receive the events
-              (when-let [reply (.recv socket ZMQ/NOBLOCK)]
+              (when-let [reply (.recv socket-in ZMQ/NOBLOCK)]
                 (let [msg (read-string (String. reply))]
                   (case (keyword (:type msg))
                     :recognition
@@ -84,8 +97,9 @@
                     (println "Unexpected reply:" msg))))
               (if (and @stop (empty? @(:expected dispatcher)))
                 (do
-                  (.send socket (str {:type :quit}))
-                  (.close socket)
+                  (.send socket-out (str {:type :quit}))
+                  (.close socket-out)
+                  (.close socket-in)
                   (.term context)
                   (shutdown-agents))
                 (recur)))
@@ -97,10 +111,10 @@
 (defn create
   "Create a dispatcher and launch a background task that will send the
   messages without exceeding the given throughput."
-  [destination throughput]
-  (let [dispatcher (Dispatcher. destination throughput (atom {}) (atom []))]
-    ;; TODO: spawn background threads reading events from ``buffer``
-    ;; at speed ``throughput``
+  [dest-in dest-out throughput]
+  (let [dispatcher (Dispatcher. dest-in dest-out throughput (atom {}) (atom []))]
+    ;; Spawn loop updates the dispatcher and returns it (and creates
+    ;; the background loop that sends the events)
     (spawn-loop dispatcher)))
 
 (defn enqueue
