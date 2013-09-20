@@ -71,7 +71,7 @@
                     (swap! buffer pop))
                   ;; Send the events waiting to be sent
                   (when (and (not (empty? @buffer))
-                             (= (:type (first @buffer) :event)))
+                             (= (:type (first @buffer)) :event))
                     (.send socket-out (str (first @buffer)))
                     (swap! buffer pop))
                   ;; Handle the expected events stored in the buffer
