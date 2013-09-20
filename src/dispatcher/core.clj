@@ -42,11 +42,12 @@
   "Spawn a background task that sends the events received by the
   dispatcher to its destination."
   [dispatcher]
-  (let [t (long (/ 1000000000 (:throughput dispatcher)))
-        ms (long (/ t 1000000))
-        ;; The accuracy would probably not be precise enough to have
-        ;; the need for nanoseconds
-        ns (mod t 1000000)
+  (let [;; Delay between each sent event
+        t (long (/ 1000000000 (:throughput dispatcher)))
+        ;; Sleep time between loops (in ns). Max throughput is thus
+        ;; limited to 1e9/wait ev/s (10k ev/s here)
+        wait 1
+        start-time (now)
         stop (atom false)
         context (ZMQ/context 1)
         socket-out (.socket context ZMQ/PUB)
@@ -57,66 +58,80 @@
         thread
         (future
           (try
-            (loop [n 0]
-              (when (= (mod n 100) 0)
-                (print "\r" n "messages sent")
-                (flush))
-              ;; Wait in order to respect the max. throughput
-              (Thread/sleep ms ns)
-              ;; Remember if we need to stop when all remaining
-              ;; expected events are recognized
-              (swap! (:buffer dispatcher)
-                     #(if (empty? %)
-                        clojure.lang.PersistentQueue/EMPTY
-                        (if (= (:type (first %)) :stop)
-                          (do
-                            (swap! stop (fn [_] true))
-                            (pop %))
-                          %)))
-              ;; Send the events waiting to be sent
-              (swap! (:buffer dispatcher)
-                     #(if (empty? %)
-                        clojure.lang.PersistentQueue/EMPTY
-                        (if (= (:type (first %)) :event)
-                          (do
-
-                            (.send socket-out (str (first %)))
-                            (pop %))
-                          %)))
-              ;; Handle the expected events stored in the buffer
-              (swap! (:buffer dispatcher)
-                     (fn [b]
-                       (let [[expected buffer] (split
-                                                #(= (:type %) :expected)
-                                                b)]
-                         (when (not (empty? expected))
-                           (mapv #(swap! (:expected dispatcher) conj {(:event %)
-                                                                      (now)})
-                                 expected))
-                         buffer)))
-              ;; Receive the events
-              (when-let [reply (.recv socket-in ZMQ/NOBLOCK)]
-                (let [msg (read-string (String. reply))]
-                  (case (keyword (:type msg))
-                    :recognition
-                    (swap! (:expected dispatcher)
-                           #(if-let [expected-t (get % (:event msg))]
-                              (let [time-took (- (now) expected-t)]
-                                (println (str "Recognition: " (:event msg)
-                                              " (took " time-took "ms)"))
-                                (dissoc % (:event msg)))
-                              (do
-                                (println "Unexpected recognition:" (:event msg))
-                                %)))
-                    (println "Unexpected reply:" msg))))
-              (if (and @stop (empty? @(:expected dispatcher)))
+            (loop [n 0
+                   last-send 0]
+              (if (> (System/nanoTime) (+ last-send t))
                 (do
-                  (.send socket-out (str {:type :quit}))
-                  (.close socket-out)
-                  (.close socket-in)
-                  (.term context)
-                  (shutdown-agents))
-                (recur (inc n))))
+                  (when (= (mod n 100) 0)
+                    (print "\r" n "messages sent")
+                    (flush))
+                  ;; Remember if we need to stop when all remaining
+                  ;; expected events are recognized
+                  (swap! (:buffer dispatcher)
+                         #(if (empty? %)
+                            clojure.lang.PersistentQueue/EMPTY
+                            (if (= (:type (first %)) :stop)
+                              (do
+                                (swap! stop (fn [_] true))
+                                (pop %))
+                              %)))
+                  ;; Send the events waiting to be sent
+                  (swap! (:buffer dispatcher)
+                         #(if (empty? %)
+                            clojure.lang.PersistentQueue/EMPTY
+                            (if (= (:type (first %)) :event)
+                              (do
+                                ;; This ``send`` takes a bit of time and
+                                ;; introduces small delays (around 2s of
+                                ;; delay when sending 30k events)
+                                (.send socket-out (str (first %)))
+                                (pop %))
+                              %)))
+                  ;; Handle the expected events stored in the buffer
+                  (swap! (:buffer dispatcher)
+                         (fn [b]
+                           (let [[expected buffer] (split
+                                                    #(= (:type %) :expected)
+                                                    b)]
+                             (when (not (empty? expected))
+                               (mapv #(swap! (:expected dispatcher) conj {(:event %)
+                                                                          (now)})
+                                     expected))
+                             buffer)))
+                  ;; Receive the events
+                  (when-let [reply (.recv socket-in ZMQ/NOBLOCK)]
+                    (let [msg (read-string (String. reply))]
+                      (case (keyword (:type msg))
+                        :recognition
+                        (swap! (:expected dispatcher)
+                               #(if-let [expected-t (get % (:event msg))]
+                                  (let [time-took (- (now) expected-t)]
+                                    (println (str "Recognition: " (:event msg)
+                                                  " (took " time-took "ms)"))
+                                    (dissoc % (:event msg)))
+                                  (do
+                                    (println "Unexpected recognition:" (:event msg))
+                                    %)))
+                        (println "Unexpected reply:" msg))))
+                  (if (or (> n 30000)
+                          (and
+                           @stop
+                           (empty? @(:expected dispatcher))))
+                    (let [duration (float (/ (- (now) start-time) 1000))]
+                      (println "\nSent" n "events in " duration "seconds"
+                               (str "(" (long (/ n duration)) " events/s)"))
+                      (.send socket-out (str {:type :quit}))
+                      (.close socket-out)
+                      (.close socket-in)
+                      (.term context)
+                      (shutdown-agents))
+                    (recur (inc n) (System/nanoTime))))
+                (do
+                  ;; It seems that calling Thread/sleep takes around
+                  ;; at least 1ms, thus limiting the throughput to at
+                  ;; most 1000 ev/s.
+                  ;; (Thread/sleep 0 wait)
+                  (recur n last-send))))
             (catch Exception e
               (println "Error in background task:" e)
               (.printStackTrace e))))]
