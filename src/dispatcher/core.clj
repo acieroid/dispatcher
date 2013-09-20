@@ -7,7 +7,7 @@
   [coll n]
   (loop [i 0
          coll coll]
-    (if (> i n)
+    (if (= i n)
       coll
       (recur (inc i) (pop coll)))))
 
@@ -22,7 +22,9 @@
      dest-out
      ;; URI from where the dispatcher will read the recognized events
      dest-in
-     ;; Maximum throughput (ev/s)
+     ;; Maximum throughput (ev/s). Above something like 10k events, it
+     ;; seems that some events will be dropped if they are not read
+     ;; fast enough at the other end of the socket.
      throughput
      ;; Map of expected events (keys), valued on the timestamp at
      ;; which they were expected
@@ -46,6 +48,7 @@
         wait 1
         start-time (now)
         stop (atom false)
+        n (atom 0)
         context (ZMQ/context 1)
         socket-out (.socket context ZMQ/PUB)
         socket-in (.socket context ZMQ/SUB)
@@ -56,12 +59,11 @@
         thread
         (future
           (try
-            (loop [n 0
-                   last-send 0]
+            (loop [last-send 0]
               (if (> (System/nanoTime) (+ last-send t))
                 (do
-                  (when (= (mod n 100) 0)
-                    (print "\r" n "messages sent")
+                  (when (= (mod @n 100) 0)
+                    (print (str "\r" @n " messages sent"))
                     (flush))
                   ;; Remember if we need to stop when all remaining
                   ;; expected events are recognized
@@ -73,6 +75,7 @@
                   (when (and (not (empty? @buffer))
                              (= (:type (first @buffer)) :event))
                     (.send socket-out (str (first @buffer)))
+                    (swap! n inc)
                     (swap! buffer pop))
                   ;; Handle the expected events stored in the buffer
                   (let [expected (take-while #(= (:type %) :expected) @buffer)]
@@ -95,25 +98,23 @@
                                     (println "Unexpected recognition:" (:event msg))
                                     %)))
                         (println "Unexpected reply:" msg))))
-                  (if (or (> n 30000)
-                          (and
-                           @stop
-                           (empty? @(:expected dispatcher))))
+                  (if (and @stop
+                           (empty? @(:expected dispatcher)))
                     (let [duration (float (/ (- (now) start-time) 1000))]
-                      (println "\nSent" n "events in " duration "seconds"
-                               (str "(" (long (/ n duration)) " events/s)"))
+                      (println "\nSent" @n "events in " duration "seconds"
+                               (str "(" (long (/ @n duration)) " events/s)"))
                       (.send socket-out (str {:type :quit}))
                       (.close socket-out)
                       (.close socket-in)
                       (.term context)
                       (shutdown-agents))
-                    (recur (inc n) (System/nanoTime))))
+                    (recur (System/nanoTime))))
                 (do
                   ;; It seems that calling Thread/sleep takes around
                   ;; at least 1ms, thus limiting the throughput to at
                   ;; most 1000 ev/s.
                   ;; (Thread/sleep 0 wait)
-                  (recur n last-send))))
+                  (recur last-send))))
             (catch Exception e
               (println "Error in background task:" e)
               (.printStackTrace e))))]
