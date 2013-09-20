@@ -2,17 +2,14 @@
   (:import [org.zeromq ZMQ]))
 
 ;; Helper functions
-(defn split
-  "Like split-with, but where ``q`` is a queue (thus call ``pop``
-  instead of ``rest``, and return a pair containing a list and a
-  queue)"
-  [pred coll]
-  (loop [a (transient [])
-         b coll]
-    (if (pred (first b))
-      (recur (conj! a (first b))
-             (pop b))
-      [(persistent! a) b])))
+(defn pop-n
+  "Call ``pop`` n times on ``coll``"
+  [coll n]
+  (loop [i 0
+         coll coll]
+    (if (> i n)
+      coll
+      (recur (inc i) (pop coll)))))
 
 ;; TODO:
 ;;   - add a callback that will be called when an event is recognized?
@@ -42,7 +39,7 @@
   "Spawn a background task that sends the events received by the
   dispatcher to its destination."
   [dispatcher]
-  (let [;; Delay between each sent event
+  (let [ ;; Delay between each sent event
         t (long (/ 1000000000 (:throughput dispatcher)))
         ;; Sleep time between loops (in ns). Max throughput is thus
         ;; limited to 1e9/wait ev/s (10k ev/s here)
@@ -55,6 +52,7 @@
         _ (.bind socket-out (:dest-out dispatcher))
         _ (.connect socket-in (:dest-in dispatcher))
         _ (.subscribe socket-in (.getBytes "")) ; subscribe to all messages
+        buffer (:buffer dispatcher)
         thread
         (future
           (try
@@ -67,37 +65,21 @@
                     (flush))
                   ;; Remember if we need to stop when all remaining
                   ;; expected events are recognized
-                  (swap! (:buffer dispatcher)
-                         #(if (empty? %)
-                            clojure.lang.PersistentQueue/EMPTY
-                            (if (= (:type (first %)) :stop)
-                              (do
-                                (swap! stop (fn [_] true))
-                                (pop %))
-                              %)))
+                  (when (and (not (empty? @buffer))
+                             (= (:type (first @buffer)) :stop))
+                    (swap! stop (fn [_] true))
+                    (swap! buffer pop))
                   ;; Send the events waiting to be sent
-                  (swap! (:buffer dispatcher)
-                         #(if (empty? %)
-                            clojure.lang.PersistentQueue/EMPTY
-                            (if (= (:type (first %)) :event)
-                              (do
-                                ;; This ``send`` takes a bit of time and
-                                ;; introduces small delays (around 2s of
-                                ;; delay when sending 30k events)
-                                (.send socket-out (str (first %)))
-                                (pop %))
-                              %)))
+                  (when (and (not (empty? @buffer))
+                             (= (:type (first @buffer) :event)))
+                    (.send socket-out (str (first @buffer)))
+                    (swap! buffer pop))
                   ;; Handle the expected events stored in the buffer
-                  (swap! (:buffer dispatcher)
-                         (fn [b]
-                           (let [[expected buffer] (split
-                                                    #(= (:type %) :expected)
-                                                    b)]
-                             (when (not (empty? expected))
-                               (mapv #(swap! (:expected dispatcher) conj {(:event %)
-                                                                          (now)})
-                                     expected))
-                             buffer)))
+                  (let [expected (take-while #(= (:type %) :expected) @buffer)]
+                    (mapv #(swap! (:expected dispatcher) conj {(:event %)
+                                                               (now)})
+                          expected)
+                    (swap! buffer pop-n (count expected)))
                   ;; Receive the events
                   (when-let [reply (.recv socket-in ZMQ/NOBLOCK)]
                     (let [msg (read-string (String. reply))]
@@ -151,7 +133,7 @@
 (defn enqueue
   "Enqueue an event to be sent later"
   [dispatcher event]
-  (swap! (:buffer dispatcher) conj {:type :event :event event})
+  (swap! (:buffer dispatcher) #(conj % {:type :event :event event}))
   dispatcher)
 
 (defn expect
