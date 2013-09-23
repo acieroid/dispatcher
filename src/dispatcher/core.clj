@@ -46,7 +46,6 @@
         ;; Sleep time between loops (in ns). Max throughput is thus
         ;; limited to 1e9/wait ev/s (10k ev/s here)
         wait 1
-        start-time (now)
         stop (atom false)
         n (atom 0)
         context (ZMQ/context 1)
@@ -55,7 +54,11 @@
         _ (.bind socket-out (:dest-out dispatcher))
         _ (.connect socket-in (:dest-in dispatcher))
         _ (.subscribe socket-in (.getBytes "")) ; subscribe to all messages
+        ;; wait a bit before publishing events, to avoid losing some
+        ;; events
+        _ (Thread/sleep 1000)
         buffer (:buffer dispatcher)
+        start-time (now)
         thread
         (future
           (try
