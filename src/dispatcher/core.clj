@@ -111,7 +111,11 @@
                       (.close socket-in)
                       (.term context)
                       (shutdown-agents))
-                    (recur (System/nanoTime))))
+                    (do
+                      (when @stop
+                        ;; Just  wait for the recognitions to happen
+                        (Thread/sleep 1000))
+                      (recur (System/nanoTime)))))
                 (do
                   ;; It seems that calling Thread/sleep takes around
                   ;; at least 1ms, thus limiting the throughput to at
