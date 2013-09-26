@@ -37,6 +37,8 @@
   []
   (System/currentTimeMillis))
 
+(def ^:dynamic *print-progress* false)
+
 (defn- spawn-loop
   "Spawn a background task that sends the events received by the
   dispatcher to its destination."
@@ -65,7 +67,7 @@
             (loop [last-send 0]
               (if (> (System/nanoTime) (+ last-send t))
                 (do
-                  (when (= (mod @n 100) 0)
+                  (when (and *print-progress* (= (mod @n 100) 0))
                     (print (str "\r" @n " messages sent"))
                     (flush))
                   ;; Remember if we need to stop when all remaining
