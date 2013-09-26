@@ -29,7 +29,7 @@
      ;; Map of expected events (keys), valued on the timestamp at
      ;; which they were expected
      expected
-     ;; Buffer of events to send (a persistent queue)
+     ;; Buffer of events to send (an atom containing a persistent queue)
      buffer])
 
 (defn now
@@ -96,8 +96,9 @@
                         (swap! (:expected dispatcher)
                                #(if-let [expected-t (get % (:event msg))]
                                   (let [time-took (- (now) expected-t)]
-                                    (println (str "Recognition: " (:event msg)
-                                                  " (took " time-took "ms)"))
+                                    (println "\nRecognition: " (:event msg)
+                                             "(took" (float (/ time-took 1000))
+                                             "seconds)")
                                     (dissoc % (:event msg)))
                                   (do
                                     (println "Unexpected recognition:" (:event msg))
@@ -106,13 +107,14 @@
                   (if (and @stop
                            (empty? @(:expected dispatcher)))
                     (let [duration (float (/ (- (now) start-time) 1000))]
-                      (println "\nSent" @n "events in " duration "seconds"
+                      (println "\nSent" @n "events in" duration "seconds"
                                (str "(" (long (/ @n duration)) " events/s)"))
                       (.send socket-out (str {:type :quit}))
                       (.close socket-out)
                       (.close socket-in)
                       (.term context)
-                      (shutdown-agents))
+                      (shutdown-agents)
+                      (System/exit 0))
                     (do
                       (when @stop
                         ;; Just  wait for the recognitions to happen
