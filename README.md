@@ -1,6 +1,8 @@
+# dispatcher
+
 Dispatcher is a simple library that will send messages on a ZeroMQ socket with a given maximum throughput.
 
-= Installing
+## Installing
 
 Add this to your ``project.clj``:
 
@@ -8,6 +10,6 @@ Add this to your ``project.clj``:
 
 And run ``lein install`` from the main directory to install the library.
 
-= Usage
+## Usage
 
 The usage is fairly simple, just check out the ``create``, ``enqueue``, ``expect``, ``finish`` and ``abort`` functions' documentation.
