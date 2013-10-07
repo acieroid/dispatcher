@@ -3,5 +3,5 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.5.1"]
-                 [org.zeromq/jzmq "2.2.3-SNAPSHOT"]]
+                 [org.zeromq/jzmq "2.2.2"]]
   :repositories {"sonatype-nexus-snapshots" "https://oss.sonatype.org/content/repositories/snapshots"})
