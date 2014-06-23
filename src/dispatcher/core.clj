@@ -1,4 +1,5 @@
 (ns dispatcher.core
+  (:require [naughtmq.core :as never-used-but-side-effecty])
   (:import [org.zeromq ZMQ]))
 
 ;; Helper functions
